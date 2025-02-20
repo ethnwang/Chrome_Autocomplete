@@ -1,0 +1,18 @@
+{
+    "manifest_version": 3,
+    "name": "AI Autocomplete",
+    "version": "1.0",
+    "description": "Provides inline text completion across websites",
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "permissions": [
+        "activeTab",
+        "storage"
+    ],
+    "content_scripts": [{
+        "matches": ["<all_urls>"],
+        "js": ["content.js"],
+        "css": ["styles.css"]
+    }]
+}

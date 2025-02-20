@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Autocomplete Settings</title>
+        <link rel="stylesheet" href="styles.css">
+    </head>
+    <body>
+        <div class="popup-container">
+            <header class="popup-header">
+                <h1>Autocomplete</h1>
+            </header>
+        
+            <main class="popup-content">
+                <div class="toggle-container">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="autocompleteToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="toggle-label">Enable Autocomplete</span>
+                </div>
+        
+                <div class="status-message" id="statusMessage">
+                    Autocomplete is disabled
+                </div>
+            </main>
+
+            <footer class="popup-footer">
+            <span class="version">v1.0</span>
+            </footer>
+        </div>
+        <script src="popup.js"></script>
+    </body>
+</html>
