@@ -1,33 +1,44 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>Autocomplete Settings</title>
-        <link rel="stylesheet" href="styles.css">
-    </head>
-    <body>
-        <div class="popup-container">
-            <header class="popup-header">
-                <h1>Autocomplete</h1>
-            </header>
-        
-            <main class="popup-content">
-                <div class="toggle-container">
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="autocompleteToggle">
-                        <span class="toggle-slider"></span>
-                    </label>
-                    <span class="toggle-label">Enable Autocomplete</span>
-                </div>
-        
-                <div class="status-message" id="statusMessage">
-                    Autocomplete is disabled
-                </div>
-            </main>
+<head>
+  <title>Autocomplete</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="tab-container">
+      <button class="tab-button active" data-tab="main">Main</button>
+      <button class="tab-button" data-tab="settings">Settings</button>
+    </div>
 
-            <footer class="popup-footer">
-            <span class="version">v1.0</span>
-            </footer>
+    <div class="tab-content active" id="main-tab">
+      <div class="toggle-container">
+        <label class="toggle-switch">
+          <input type="checkbox" id="autocompleteToggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">Enable Autocomplete</span>
+      </div>
+      
+      <div class="status-message" id="statusMessage">
+        Autocomplete is disabled
+      </div>
+    </div>
+
+    <div class="tab-content" id="settings-tab">
+      <div class="settings-form">
+        <div class="form-group">
+          <label for="apiKey">API Key:</label>
+          <input type="text" id="apiKey" placeholder="Enter your API key">
         </div>
-        <script src="popup.js"></script>
-    </body>
+        <button id="saveSettings" class="button">Save</button>
+      </div>
+    </div>
+
+    <footer class="popup-footer">
+      <span class="version">v1.0</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
 </html>

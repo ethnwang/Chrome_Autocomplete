@@ -3,16 +3,23 @@
     "name": "AI Autocomplete",
     "version": "1.0",
     "description": "Provides inline text completion across websites",
+    "permissions": [
+    "activeTab",
+    "storage"
+    ],
+    "host_permissions": [
+        "https://api.groq.com/*"
+    ],
     "action": {
         "default_popup": "popup.html"
     },
-    "permissions": [
-        "activeTab",
-        "storage"
-    ],
     "content_scripts": [{
         "matches": ["<all_urls>"],
         "js": ["content.js"],
         "css": ["styles.css"]
+    }],
+    "web_accessible_resources": [{
+        "resources": ["styles.css"],
+        "matches": ["<all_urls>"]
     }]
 }
