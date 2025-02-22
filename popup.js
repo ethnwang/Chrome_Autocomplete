@@ -74,35 +74,47 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Handle settings save
   document.getElementById('saveSettings').addEventListener('click', function() {
-      const apiKey = document.getElementById('apiKey').value.trim();
-      
-      if (!apiKey) {
-          const button = document.getElementById('saveSettings');
-          button.textContent = 'API Key Required!';
-          button.style.backgroundColor = '#dc3545';
-          
-          setTimeout(() => {
-              button.textContent = 'Save';
-              button.style.backgroundColor = '#1a73e8';
-          }, 2000);
-          return;
-      }
+    const apiKey = document.getElementById('apiKey').value.trim();
+    
+    if (!apiKey) {
+        const button = document.getElementById('saveSettings');
+        button.textContent = 'API Key Required!';
+        button.style.backgroundColor = '#dc3545';
+        
+        setTimeout(() => {
+            button.textContent = 'Save';
+            button.style.backgroundColor = '#1a73e8';
+        }, 2000);
+        return;
+    }
 
-      chrome.storage.sync.set({
-          groqApiKey: apiKey
-      }, function() {
-          // Show success message
-          const button = document.getElementById('saveSettings');
-          button.textContent = 'Saved!';
-          button.style.backgroundColor = '#28a745';
-          toggleSwitch.disabled = false;
-          
-          setTimeout(() => {
-              button.textContent = 'Save';
-              button.style.backgroundColor = '#1a73e8';
-          }, 2000);
-      });
-  });
+    if (!apiKey.startsWith('gsk_')) {
+        const button = document.getElementById('saveSettings');
+        button.textContent = 'Invalid API Key Format!';
+        button.style.backgroundColor = '#dc3545';
+        
+        setTimeout(() => {
+            button.textContent = 'Save';
+            button.style.backgroundColor = '#1a73e8';
+        }, 2000);
+        return;
+    }
+
+    chrome.storage.sync.set({
+        groqApiKey: apiKey
+    }, function() {
+        // Show success message
+        const button = document.getElementById('saveSettings');
+        button.textContent = 'Saved!';
+        button.style.backgroundColor = '#28a745';
+        toggleSwitch.disabled = false;
+        
+        setTimeout(() => {
+            button.textContent = 'Save';
+            button.style.backgroundColor = '#1a73e8';
+        }, 2000);
+    });
+});
 
   function updateStatus(enabled, customMessage = null) {
       if (customMessage) {

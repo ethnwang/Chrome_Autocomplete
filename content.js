@@ -1,3 +1,5 @@
+// import Groq from "groq-sdk";
+
 // Track enabled state and active element
 let isEnabled = false;
 let activeElement = null;
@@ -207,9 +209,29 @@ async function getSuggestionAndDisplay(text) {
     }
 }
 
+// const groq = new Groq({ apiKey: apiKey });
+
+// response = groq.chat.completions.create({
+//     messages: [
+//         {
+//             role: "system",
+//             content: "You are an autocomplete assistant. Complete the user's text naturally and briefly. Only provide the completion, no other text."
+//         },
+//         {
+//             role: "user",
+//             content: `Complete this text naturally: "${text}"`
+//         }
+//     ],
+//     model: "llama-3.3-70b-versatile",
+//     max_tokens: 20,
+//     temperature: 0.3,
+//     top_p: 1,
+//     stop: ["\n", ".", "!", "?"] // Stop at natural breaks
+// });
+// return response
+
 async function getAISuggestion(text) {
     try {
-        
         // Get API key from storage
         const result = await chrome.storage.sync.get(['groqApiKey']).catch(err => {
             console.warn('Failed to access chrome storage:', err);
@@ -222,7 +244,11 @@ async function getAISuggestion(text) {
             throw new Error('No API key found');
         }
 
-        const response = await fetch('https://api.groq.com/v1/chat/completions', {
+        if (!apiKey.startsWith('gsk_')) {
+            throw new Error('Invalid API key format');
+        }
+
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
@@ -248,17 +274,22 @@ async function getAISuggestion(text) {
         });
 
         if (!response.ok) {
-            throw new Error('API request failed');
+            const errorText = await response.text();
+            console.error('Groq API error:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+            });
+            throw new Error(`API request failed: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
         return data.choices[0].message.content.trim();
     } catch (error) {
-        console.error('Error calling Groq API:', error);
+        console.error('Error in getAISuggestion:', error);
         return null;
     }
 }
-
 function showSuggestion(suggestion) {
     if (!activeElement) return;
 
