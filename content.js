@@ -1,6 +1,4 @@
-// import Groq from "groq-sdk";
-
-// Track enabled state and active element
+// State management
 let isEnabled = false;
 let activeElement = null;
 let currentSuggestionElement = null;
@@ -29,8 +27,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// Only run event listeners if enabled
-document.addEventListener('focusin', (event) => {
+// Add event listeners to frames (including main window)
+function addListenersToFrame(frameElement) {
+    const frameDoc = frameElement ? (frameElement.contentDocument || frameElement.contentWindow.document) : document;
+    
+    frameDoc.addEventListener('focusin', handleFocusIn);
+    frameDoc.addEventListener('input', handleInput);
+    frameDoc.addEventListener('keydown', handleKeyDown);
+    frameDoc.addEventListener('scroll', handleScroll, true);
+    frameDoc.addEventListener('mousedown', handleMouseDown);
+}
+
+// Event Handlers
+function handleFocusIn(event) {
     if (!isEnabled) return;
     
     const element = event.target;
@@ -38,34 +47,57 @@ document.addEventListener('focusin', (event) => {
         console.log('Editable element focused:', element);
         activeElement = element;
     }
-});
+}
 
-document.addEventListener('input', (event) => {
+function handleInput(event) {
     if (!isEnabled || !activeElement) return;
 
-    // Clear previous timer
     if (debounceTimer) {
         clearTimeout(debounceTimer);
     }
 
-    // Set new timer
     debounceTimer = setTimeout(() => {
         handleTextChange(event);
-    }, 300); // Wait 300ms after user stops typing
-});
+    }, 300);
+}
 
-// Handle tab key for completion
-document.addEventListener('keydown', (event) => {
+function handleKeyDown(event) {
     if (!isEnabled || !activeElement || !currentSuggestionElement) return;
 
     if (event.key === 'Tab' && !event.shiftKey) {
         event.preventDefault();
         acceptSuggestion();
     }
-});
+}
+
+function handleScroll(event) {
+    if (currentSuggestionElement) {
+        updateSuggestionPosition();
+    }
+}
+
+function handleMouseDown(event) {
+    if (currentSuggestionElement && event.target !== currentSuggestionElement) {
+        removeSuggestion();
+    }
+}
 
 // Enhanced check for editable elements
 function isEditableElement(element) {
+    // Handle Google Docs specific elements
+    if (window.location.hostname === 'docs.google.com') {
+        if (element.classList.contains('kix-lineview') ||
+            element.classList.contains('docs-texteventtarget-iframe') ||
+            element.closest('.docs-editor-container')) {
+            return true;
+        }
+        
+        const docsEditor = element.closest('[contenteditable="true"][role="textbox"]');
+        if (docsEditor) {
+            return true;
+        }
+    }
+
     // Standard form inputs
     if (element.tagName === 'INPUT') {
         const validTypes = ['text', 'email', 'search', 'url', 'tel', 'password'];
@@ -128,69 +160,260 @@ function hasEditableParent(element) {
     return false;
 }
 
+// Get text content based on element type
+function getTextContent(element) {
+    if (window.location.hostname === 'docs.google.com') {
+        const activeLine = element.closest('.kix-lineview');
+        if (activeLine) {
+            return activeLine.textContent;
+        }
+        
+        const editorContainer = element.closest('.docs-editor-container');
+        if (editorContainer) {
+            return editorContainer.textContent;
+        }
+    }
+
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        return element.value;
+    }
+
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(element);
+        return preCaretRange.toString();
+    }
+
+    return element.textContent;
+}
+
+// Get cursor position
+function getCursorPosition(element) {
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        return element.selectionStart;
+    }
+
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        return range.startOffset;
+    }
+
+    return 0;
+}
+
 async function handleTextChange(event) {
+    console.log('handleTextChange triggered');
     let text, cursorPosition;
 
     // Clear any existing suggestion timer
     if (suggestionTimer) {
         clearTimeout(suggestionTimer);
+        console.log('Cleared existing suggestion timer');
     }
 
     // Mark that user is typing
     isTyping = true;
+    console.log('User is typing:', isTyping);
     
     // Clear any existing typing timer
     if (typingTimer) {
         clearTimeout(typingTimer);
     }
 
-    // Set a timer to mark when user stops typing
-    typingTimer = setTimeout(() => {
-        isTyping = false;
-    }, 1000); // Consider user stopped typing after 1 second of no input
-
-    // Handle different types of editable elements
-    if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-        text = activeElement.value;
-        cursorPosition = activeElement.selectionStart;
-    } else {
-        text = activeElement.textContent;
+    // Get text and cursor position for Google Docs
+    if (window.location.hostname === 'docs.google.com') {
+        console.log('Getting text from Google Docs editor');
+        const element = activeElement;
+        
+        // Try to get text from different possible elements
+        if (element.classList.contains('kix-lineview')) {
+            text = element.textContent;
+            console.log('Got text from kix-lineview:', text);
+        } else if (element.closest('.docs-editor-container')) {
+            const editorContainer = element.closest('.docs-editor-container');
+            text = editorContainer.textContent;
+            console.log('Got text from editor container:', text);
+        }
+        
+        // Get cursor position from selection
         const selection = window.getSelection();
         if (selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             cursorPosition = range.startOffset;
+            console.log('Cursor position:', cursorPosition);
         }
+    } else {
+        // Standard input handling
+        text = activeElement.value || activeElement.textContent;
+        cursorPosition = activeElement.selectionStart || 0;
+        console.log('Standard input - Text:', text, 'Cursor:', cursorPosition);
     }
 
-    const textBeforeCursor = text.slice(0, cursorPosition);
+    const textBeforeCursor = text ? text.slice(0, cursorPosition) : '';
+    console.log('Text before cursor:', textBeforeCursor);
     
     // Remove suggestion if not enough context
     if (textBeforeCursor.trim().length < 3) {
+        console.log('Not enough context for suggestion');
         removeSuggestion();
         return;
     }
 
     const currentTime = Date.now();
     const timeSinceLastSuggestion = currentTime - lastSuggestionTime;
+    console.log('Time since last suggestion:', timeSinceLastSuggestion);
     
-    // Only proceed if it's been 4 seconds since last suggestion
+    // Reduced wait time to 2000ms
     if (timeSinceLastSuggestion < 4000) {
-        // Set a timer for the remaining time
+        console.log('Waiting for cooldown period');
         suggestionTimer = setTimeout(() => {
-            if (!isTyping) { // Only make suggestion if user has stopped typing
+            if (!isTyping) {
+                console.log('Cooldown complete, getting suggestion');
                 getSuggestionAndDisplay(textBeforeCursor);
             }
         }, 4000 - timeSinceLastSuggestion);
         return;
     }
 
-    // If we're here, it's been more than 4 seconds
-    // Wait for user to stop typing before making suggestion
+    // If we're here, it's been more than 2 seconds
     suggestionTimer = setTimeout(() => {
         if (!isTyping) {
+            console.log('Getting suggestion after typing stopped');
             getSuggestionAndDisplay(textBeforeCursor);
+        } else {
+            console.log('Still typing, not getting suggestion');
         }
-    }, 1000); // Wait 1 second after user stops typing
+    }, 1000);
+}
+
+// Update getAISuggestion to add debugging
+async function getAISuggestion(text) {
+    console.log('Getting AI suggestion for text:', text);
+    try {
+        const result = await chrome.storage.sync.get(['encryptedGroqKey']);
+        
+        if (!result.encryptedGroqKey) {
+            console.error('No API key found in storage');
+            return null;
+        }
+
+        console.log('Decrypting API key');
+        const apiKey = await window.encryptionUtils.decryptApiKey(result.encryptedGroqKey);
+        
+        if (!apiKey || !apiKey.startsWith('gsk_')) {
+            console.error('Invalid API key format');
+            return null;
+        }
+
+        console.log('Making API request to Groq');
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are an autocomplete assistant. Complete the user's text naturally and briefly. Only provide the completion, no other text."
+                    },
+                    {
+                        role: "user",
+                        content: `Complete this text naturally: "${text}"`
+                    }
+                ],
+                model: "llama-3.3-70b-versatile",
+                max_tokens: 20,
+                temperature: 0.3,
+                top_p: 1,
+                stop: ["\n", ".", "!", "?"]
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('API request failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+            });
+            return null;
+        }
+
+        const data = await response.json();
+        console.log('Received suggestion from API:', data.choices[0].message.content);
+        return data.choices[0].message.content.trim();
+    } catch (error) {
+        console.error('Error in getAISuggestion:', error);
+        return null;
+    }
+}
+
+// Update showSuggestion to add debugging
+function showSuggestion(suggestion) {
+    console.log('Showing suggestion:', suggestion);
+    if (!activeElement) {
+        console.log('No active element, cannot show suggestion');
+        return;
+    }
+
+    removeSuggestion();
+
+    // Create suggestion element
+    const suggestionElement = document.createElement('div');
+    suggestionElement.className = 'ai-autocomplete-suggestion';
+    suggestionElement.textContent = suggestion;
+
+    // Get computed styles from active element
+    const computedStyle = window.getComputedStyle(activeElement);
+    console.log('Copying styles from active element');
+    
+    // Copy styles
+    const stylesToCopy = [
+        'fontSize',
+        'fontFamily',
+        'fontWeight',
+        'fontStyle',
+        'letterSpacing',
+        'lineHeight',
+        'textTransform',
+        'wordSpacing',
+        'padding',
+        'border',
+        'color'
+    ];
+
+    stylesToCopy.forEach(style => {
+        suggestionElement.style[style] = computedStyle[style];
+    });
+
+    // Position the suggestion
+    const rect = activeElement.getBoundingClientRect();
+    console.log('Active element rect:', rect);
+    const cursorCoords = getCursorCoordinates();
+    console.log('Cursor coordinates:', cursorCoords);
+
+    suggestionElement.style.position = 'fixed';
+    suggestionElement.style.top = `${cursorCoords.top}px`;
+    suggestionElement.style.left = `${cursorCoords.left}px`;
+    suggestionElement.style.opacity = '0.7';
+    suggestionElement.style.zIndex = '999999'; // Ensure it's on top
+    
+    // Match background color
+    const parentBg = computedStyle.backgroundColor;
+    if (parentBg !== 'rgba(0, 0, 0, 0)' && parentBg !== 'transparent') {
+        suggestionElement.style.backgroundColor = parentBg;
+    }
+
+    // Add to appropriate document
+    const targetDoc = activeElement.ownerDocument;
+    targetDoc.body.appendChild(suggestionElement);
+    currentSuggestionElement = suggestionElement;
+    console.log('Suggestion element added to document');
 }
 
 // Helper function to get and display suggestion
@@ -209,42 +432,17 @@ async function getSuggestionAndDisplay(text) {
     }
 }
 
-// const groq = new Groq({ apiKey: apiKey });
-
-// response = groq.chat.completions.create({
-//     messages: [
-//         {
-//             role: "system",
-//             content: "You are an autocomplete assistant. Complete the user's text naturally and briefly. Only provide the completion, no other text."
-//         },
-//         {
-//             role: "user",
-//             content: `Complete this text naturally: "${text}"`
-//         }
-//     ],
-//     model: "llama-3.3-70b-versatile",
-//     max_tokens: 20,
-//     temperature: 0.3,
-//     top_p: 1,
-//     stop: ["\n", ".", "!", "?"] // Stop at natural breaks
-// });
-// return response
-
 async function getAISuggestion(text) {
     try {
-        // Get API key from storage
-        const result = await chrome.storage.sync.get(['groqApiKey']).catch(err => {
-            console.warn('Failed to access chrome storage:', err);
-            return { groqApiKey: null };
-        });
+        const result = await chrome.storage.sync.get(['encryptedGroqKey']);
         
-        const apiKey = result.groqApiKey;
-        
-        if (!apiKey) {
+        if (!result.encryptedGroqKey) {
             throw new Error('No API key found');
         }
 
-        if (!apiKey.startsWith('gsk_')) {
+        const apiKey = await window.encryptionUtils.decryptApiKey(result.encryptedGroqKey);
+        
+        if (!apiKey || !apiKey.startsWith('gsk_')) {
             throw new Error('Invalid API key format');
         }
 
@@ -269,18 +467,12 @@ async function getAISuggestion(text) {
                 max_tokens: 20,
                 temperature: 0.3,
                 top_p: 1,
-                stop: ["\n", ".", "!", "?"] // Stop at natural breaks
+                stop: ["\n", ".", "!", "?"]
             })
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Groq API error:', {
-                status: response.status,
-                statusText: response.statusText,
-                error: errorText
-            });
-            throw new Error(`API request failed: ${response.status} - ${errorText}`);
+            throw new Error(`API request failed: ${response.status}`);
         }
 
         const data = await response.json();
@@ -290,10 +482,10 @@ async function getAISuggestion(text) {
         return null;
     }
 }
+
 function showSuggestion(suggestion) {
     if (!activeElement) return;
 
-    // Remove any existing suggestion
     removeSuggestion();
 
     // Create suggestion element
@@ -301,10 +493,10 @@ function showSuggestion(suggestion) {
     suggestionElement.className = 'ai-autocomplete-suggestion';
     suggestionElement.textContent = suggestion;
 
-    // Get all computed styles from the active element
+    // Get computed styles from active element
     const computedStyle = window.getComputedStyle(activeElement);
     
-    // Copy relevant text styles
+    // Copy styles
     const stylesToCopy = [
         'fontSize',
         'fontFamily',
@@ -314,11 +506,8 @@ function showSuggestion(suggestion) {
         'lineHeight',
         'textTransform',
         'wordSpacing',
-        'paddingLeft',
-        'paddingTop',
-        'paddingRight',
-        'paddingBottom',
-        'borderWidth',
+        'padding',
+        'border',
         'color'
     ];
 
@@ -326,51 +515,60 @@ function showSuggestion(suggestion) {
         suggestionElement.style[style] = computedStyle[style];
     });
 
-    // Calculate the position of the cursor
+    // Position the suggestion
     const rect = activeElement.getBoundingClientRect();
-    let cursorPosition;
-    
-    if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-        // For regular input elements
-        const text = activeElement.value.substring(0, activeElement.selectionStart);
-        cursorPosition = measureText(text, computedStyle);
-    } else {
-        // For contenteditable elements
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const preCaretRange = range.cloneRange();
-            preCaretRange.selectNodeContents(activeElement);
-            preCaretRange.setEnd(range.endContainer, range.endOffset);
-            cursorPosition = measureText(preCaretRange.toString(), computedStyle);
-        }
-    }
+    const cursorCoords = getCursorCoordinates();
 
-    // Position the suggestion element
-    suggestionElement.style.position = 'absolute';
-    suggestionElement.style.top = `${rect.top + window.scrollY}px`;
-    suggestionElement.style.left = `${rect.left + cursorPosition.width}px`;
+    suggestionElement.style.position = 'fixed';
+    suggestionElement.style.top = `${cursorCoords.top}px`;
+    suggestionElement.style.left = `${cursorCoords.left}px`;
     suggestionElement.style.opacity = '0.7';
     
-    // Match the background color of the parent
+    // Match background color
     const parentBg = computedStyle.backgroundColor;
     if (parentBg !== 'rgba(0, 0, 0, 0)' && parentBg !== 'transparent') {
         suggestionElement.style.backgroundColor = parentBg;
     }
 
-    document.body.appendChild(suggestionElement);
+    // Add to appropriate document
+    const targetDoc = activeElement.ownerDocument;
+    targetDoc.body.appendChild(suggestionElement);
     currentSuggestionElement = suggestionElement;
 }
 
-// Helper function to measure text width
-function measureText(text, computedStyle) {
+function getCursorCoordinates() {
+    const element = activeElement;
+    let rect = element.getBoundingClientRect();
+    let cursorPosition;
+
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        const text = element.value.substring(0, element.selectionStart);
+        cursorPosition = measureText(text, window.getComputedStyle(element));
+    } else {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            const preCaretRange = range.cloneRange();
+            preCaretRange.selectNodeContents(element);
+            preCaretRange.setEnd(range.endContainer, range.endOffset);
+            cursorPosition = measureText(preCaretRange.toString(), window.getComputedStyle(element));
+        }
+    }
+
+    return {
+        top: rect.top + (cursorPosition ? cursorPosition.height : 0),
+        left: rect.left + (cursorPosition ? cursorPosition.width : 0)
+    };
+}
+
+function measureText(text, style) {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
-    context.font = `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     
     return {
         width: context.measureText(text).width,
-        height: parseInt(computedStyle.fontSize)
+        height: parseInt(style.fontSize)
     };
 }
 
@@ -385,29 +583,56 @@ function acceptSuggestion() {
     if (!currentSuggestionElement || !activeElement) return;
 
     const suggestion = currentSuggestionElement.textContent;
+    insertTextIntoEditor(activeElement, suggestion);
+    removeSuggestion();
+}
+
+function insertTextIntoEditor(element, text) {
+    if (window.location.hostname === 'docs.google.com') {
+        // Create and dispatch custom events for Google Docs
+        const inputEvent = new InputEvent('input', {
+            data: text,
+            inputType: 'insertText',
+            isComposing: false
+        });
+        
+        element.dispatchEvent(new InputEvent('beforeinput', {
+            data: text,
+            inputType: 'insertText',
+            isComposing: false
+        }));
+        element.dispatchEvent(inputEvent);
+        
+        // Try to update visible content
+        if (element.textContent !== undefined) {
+            element.textContent += text;
+        }
+        return;
+    }
     
-    if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-        const cursorPosition = activeElement.selectionStart;
-        const currentValue = activeElement.value;
-        
-        activeElement.value = currentValue.slice(0, cursorPosition) + 
-                             suggestion + 
-                             currentValue.slice(cursorPosition);
-        
-        // Move cursor to end of suggestion
-        activeElement.selectionStart = activeElement.selectionEnd = 
-            cursorPosition + suggestion.length;
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        const cursorPosition = element.selectionStart;
+        element.value = element.value.slice(0, cursorPosition) + 
+                       text + 
+                       element.value.slice(cursorPosition);
+        element.selectionStart = element.selectionEnd = cursorPosition + text.length;
     } else {
-        // Handle contenteditable elements
         const selection = window.getSelection();
         const range = selection.getRangeAt(0);
-        const textNode = document.createTextNode(suggestion);
+        const textNode = document.createTextNode(text);
         range.insertNode(textNode);
         range.setStartAfter(textNode);
         range.setEndAfter(textNode);
     }
+}
 
-    removeSuggestion();
+// Helper function to update suggestion position
+function updateSuggestionPosition() {
+    if (!currentSuggestionElement || !activeElement) return;
+    
+    const cursorCoords = getCursorCoordinates();
+    currentSuggestionElement.style.top = `${cursorCoords.top}px`;
+    currentSuggestionElement.style.left = `${cursorCoords.left}px`;
 }
 
 // Helper function to clean up when disabled
@@ -419,20 +644,140 @@ function cleanupAutocomplete() {
     isTyping = false;
 }
 
-// Enhanced mutation observer to track dynamic changes
-const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-        if (mutation.type === 'childList' && activeElement) {
-            // Check if our activeElement was removed
-            if (!document.contains(activeElement)) {
-                activeElement = null;
+// Initialize iframe observers
+function initializeFrameObservers() {
+    // Observer for the main document
+    const mainObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+                // Check for new iframes
+                mutation.addedNodes.forEach(node => {
+                    if (node.tagName === 'IFRAME') {
+                        handleNewIframe(node);
+                    }
+                });
+                
+                // Check if activeElement was removed
+                if (activeElement && !document.contains(activeElement)) {
+                    activeElement = null;
+                    removeSuggestion();
+                }
             }
         }
-    }
-});
+    });
 
-// Start observing the document
-observer.observe(document.body, {
-    childList: true,
-    subtree: true
-});
+    // Start observing the main document
+    mainObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Handle existing iframes
+    document.querySelectorAll('iframe').forEach(handleNewIframe);
+}
+
+// Helper function to handle new iframes
+function handleNewIframe(iframe) {
+    // Ignore if not a valid iframe element
+    if (!iframe || !(iframe instanceof HTMLIFrameElement)) {
+        return;
+    }
+
+    try {
+        // For same-origin iframes that are already loaded
+        if (iframe.contentDocument) {
+            addListenersToFrame(iframe);
+            observeIframeContent(iframe);
+            return;
+        }
+
+        // For iframes that are not yet loaded or might be cross-origin
+        iframe.addEventListener('load', () => {
+            try {
+                // After load, check if we can access the contentDocument
+                if (iframe.contentDocument) {
+                    addListenersToFrame(iframe);
+                    observeIframeContent(iframe);
+                }
+            } catch (e) {
+                // This is normal for cross-origin iframes
+                if (e.name === 'SecurityError') {
+                    console.log('Cross-origin iframe loaded:', iframe.src);
+                } else {
+                    console.warn('Error handling loaded iframe:', e);
+                }
+            }
+        });
+    } catch (e) {
+        // Log but don't throw
+        console.warn('Failed to handle iframe:', e);
+    }
+}
+
+// Helper function to observe iframe content
+function observeIframeContent(iframe) {
+    // Check if we can access the iframe's document
+    try {
+        // First check if we can access the contentWindow
+        if (!iframe.contentWindow) {
+            console.log('Cannot access iframe contentWindow - likely cross-origin');
+            return;
+        }
+
+        // Try to access the document - this will throw if cross-origin
+        const frameDoc = iframe.contentDocument;
+        if (!frameDoc) {
+            console.log('Cannot access iframe contentDocument - likely cross-origin');
+            return;
+        }
+
+        // Wait for body to be available
+        if (!frameDoc.body) {
+            const bodyCheckInterval = setInterval(() => {
+                if (frameDoc.body) {
+                    clearInterval(bodyCheckInterval);
+                    setupFrameObserver(frameDoc);
+                }
+            }, 100);
+            
+            // Clear interval after 5 seconds to prevent infinite checking
+            setTimeout(() => clearInterval(bodyCheckInterval), 5000);
+            return;
+        }
+
+        setupFrameObserver(frameDoc);
+    } catch (e) {
+        // This is expected for cross-origin iframes
+        if (e.name === 'SecurityError' || e.name === 'TypeError') {
+            console.log('Cross-origin iframe detected:', iframe.src);
+        } else {
+            console.warn('Unexpected error observing iframe:', e);
+        }
+    }
+}
+
+function setupFrameObserver(frameDoc) {
+    try {
+        const frameObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && activeElement) {
+                    if (!frameDoc.contains(activeElement)) {
+                        activeElement = null;
+                        removeSuggestion();
+                    }
+                }
+            }
+        });
+
+        frameObserver.observe(frameDoc.body, {
+            childList: true,
+            subtree: true
+        });
+    } catch (e) {
+        console.warn('Failed to setup frame observer:', e);
+    }
+}
+
+// Initialize event listeners and observers
+addListenersToFrame(null); // Add listeners to main window
+initializeFrameObservers();

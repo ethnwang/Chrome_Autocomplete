@@ -198,18 +198,18 @@ input:checked + .toggle-slider:before {
 
 /* Autocomplete suggestion styles */
 .ai-autocomplete-suggestion {
-    position: absolute;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: inherit;
-    color: #666;
-    pointer-events: none;
-    z-index: 999999;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    font-family: inherit;
-    line-height: inherit;
+    position: fixed !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    border: 1px solid #ddd !important;
+    border-radius: 4px !important;
+    padding: 4px 8px !important;
+    font-size: inherit !important;
+    color: #666 !important;
+    pointer-events: none !important;
+    z-index: 999999 !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+    font-family: inherit !important;
+    line-height: inherit !important;
 }
 
 /* Add a subtle highlight effect */
